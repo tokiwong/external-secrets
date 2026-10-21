@@ -1,0 +1,20 @@
+Design decisions for per-replica CMEK (issue #6317):
+
+- Kept the field name replicationLocations rather than adding a new
+  "replicas" field; the type changed from []string to
+  []PushSecretReplica with a custom UnmarshalJSON that accepts both
+  plain location strings (existing metadata keeps parsing) and
+  {location, cmekKeyName} objects. sigs.k8s.io/yaml converts YAML to
+  JSON first, so encoding/json hooks apply.
+- The alias-type trick in UnmarshalJSON is mandatory: decoding into the
+  receiver's own type recurses into UnmarshalJSON forever (stack
+  overflow caught in tests).
+- Automatic+CMEK (cmekKeyName alone) is valid per GCP docs but only
+  with a key from the "global" multi-region; validateGlobalCMEKKeyName
+  enforces this and points users at per-replica keys for regional keys.
+  ForgeCloud's own secrets.go pattern (user-managed + per-location
+  regional keys) matches the new structured entries.
+- buildReplication now returns (replication, error); the only caller
+  (client.go PushSecret create path) propagates it.
+- Regional secrets (store.Location != "") never receive replication in
+  the create path; the regional update path is untouched.
