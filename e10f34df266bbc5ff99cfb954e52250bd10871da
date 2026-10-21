@@ -1,0 +1,28 @@
+Design decisions for per-replica CMEK (issue #6317):
+
+- Kept the field name replicationLocations rather than adding a new
+  "replicas" field; the type changed from []string to
+  []PushSecretReplica with a custom UnmarshalJSON that accepts both
+  plain location strings (existing metadata keeps parsing) and
+  {location, cmekKeyName} objects. sigs.k8s.io/yaml converts YAML to
+  JSON first, so encoding/json hooks apply.
+- The alias-type trick in UnmarshalJSON is mandatory: decoding into the
+  receiver's own type recurses into UnmarshalJSON forever (stack
+  overflow caught in tests). The string branch rejects empty/null
+  entries; the object branch rejects unknown fields and empty location.
+- A CMEK key used alone (no replicationLocations) with automatic
+  replication must come from the "global" multi-region per GCP docs;
+  validateGlobalCMEKKeyName enforces this. The validation is skipped
+  for regional SecretStores (buildReplication takes regionalStore)
+  because regional secrets carry no replication at all - the key is
+  applied through the regional endpoint. First review draft missed
+  this: it hard-failed the documented regional-store + regional-key
+  pattern. Regression test in client_test.go covers it.
+- Per-replica key inheritance from top-level cmekKeyName is only valid
+  when the inherited key matches the replica location (GCP: user-managed
+  replica keys must map exactly to the replica location); docs carry a
+  caveat instead of code validation, per user decision.
+- buildReplication copies the parsed spec before mutating entries to
+  avoid aliasing the caller's metadata.
+- Regional secrets (store.Location != "") never receive replication in
+  the create path; the regional update path is untouched.
